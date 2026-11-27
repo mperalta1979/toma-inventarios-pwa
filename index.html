@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Control Toma de Inventarios</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#4fb3e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Toma Inventarios">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* VOICE: sala de control de bodega, sobrio y directo, cifras primero
+   IDEA: tablero de avance de una toma física — planilla de conteo con su barra de progreso
+   PICTURE: medidor grande de cobertura + curva acumulada de avance con proyección al 100%
+   COLOUR and TYPE: banda cielo #4fb3e8, tinta #10223a, naranja #ff7a1a para diferencias; Outfit + Inter
+   LAYOUT: banda con hallazgo y cifras, luego grupos, avance, diferencias y pendientes en bandas */
+:root{color-scheme:light dark;--bg:light-dark(#ffffff,#0b1726);--ink:light-dark(#10223a,#e8f1fa);--mut:light-dark(#5a6b80,#9fb2c8);--line:light-dark(#dfe7ef,#22364f);--sky:#4fb3e8;--skyd:light-dark(#2f8fc6,#4fb3e8);--org:#ff7a1a;--ok:light-dark(#1f8a5b,#4fd39a);--card:light-dark(#f4f8fb,#102238);--band:light-dark(#4fb3e8,#123352);--bandInk:light-dark(#0b1d33,#e8f1fa)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Inter,system-ui,sans-serif;overflow-x:clip}
+h1,h2,h3{font-family:Outfit,Inter,sans-serif;line-height:1.08;margin:0;text-wrap:balance}
+h1{font-size:clamp(28px,4vw,44px)}h2{font-size:clamp(22px,2.6vw,30px);margin-bottom:6px}h3{font-size:18px}
+.band{padding:clamp(24px,3.5vw,52px) max(5vw,16px)}.wrap{max-width:1240px;margin:0 auto}
+.top{background:var(--band);color:var(--bandInk)}
+.top .sub{opacity:.85;margin:6px 0 0}
+.bar{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;align-items:center}
+.btn{font:600 15px Inter,sans-serif;min-height:44px;padding:0 16px;border-radius:10px;border:1.5px solid currentColor;background:transparent;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn.pri{background:var(--bandInk);color:var(--band);border-color:var(--bandInk)}
+.btn.sm{min-height:36px;font-size:13px;padding:0 12px}
+.btn:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--org);outline-offset:2px}
+.status{font-size:13px;opacity:.9}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:28px;margin-top:26px;align-items:stretch}
+.gauge{background:light-dark(#ffffffd9,#0b1726b3);color:var(--ink);border-radius:16px;padding:22px;display:flex;flex-direction:column;gap:14px}
+.big{font:700 clamp(40px,5vw,62px)/1 Outfit,sans-serif}.gtwo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.gtwo>div{display:flex;flex-direction:column;gap:8px}.gtwo .big.cs{color:var(--org)}.meter.o i,.gtwo .meter.o i{background:var(--org)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;margin-bottom:6px}.legend i{display:inline-block;width:14px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.meter{height:18px;border-radius:9px;background:var(--line);overflow:hidden}.meter i{display:block;height:100%;background:var(--skyd);border-radius:9px;transition:width .6s}
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px}
+.kpis b{display:block;font:600 22px Outfit,sans-serif}.kpis span{font-size:13px;color:var(--mut)}
+.chartcard{background:light-dark(#ffffffd9,#0b1726b3);color:var(--ink);border-radius:16px;padding:18px 18px 8px;display:flex;flex-direction:column}
+.fig{position:relative;min-height:260px;flex:1}.fig>svg{position:absolute;inset:0;width:100%;height:100%}
+.proj{font-size:15px;margin:4px 0 10px}.proj b{color:var(--org)}
+.card{background:var(--card);border-radius:14px;padding:18px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--line);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer;user-select:none;background:var(--bg)}
+.chip input{width:16px;height:16px;accent-color:var(--skyd)}
+.chip.off{opacity:.5;text-decoration:line-through}
+.chip small{color:var(--mut)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:12px;color:var(--mut);font-weight:600;white-space:nowrap;cursor:default}
+th.s{cursor:pointer}th.s:hover{color:var(--ink)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.neg{color:var(--org);font-weight:600}.pos{color:var(--skyd);font-weight:600}
+.rowbar{display:flex;align-items:center;gap:8px;min-width:120px}.rowbar .meter{height:8px;flex:1}.rowbar em{font-style:normal;font-size:13px;width:44px;text-align:right}
+.meter.o i{background:var(--org)}
+.tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0}
+input[type=text],input[type=date],select{font:16px Inter,sans-serif;min-height:44px;padding:0 12px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink)}
+.note{font-size:13px;color:var(--mut)}
+.empty{padding:28px;text-align:center;color:var(--mut);border:2px dashed var(--line);border-radius:14px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:14px}
+.tab{font:600 15px Inter;padding:10px 14px;border:0;background:none;color:var(--mut);border-bottom:3px solid transparent;cursor:pointer;min-height:44px}
+.tab.on{color:var(--ink);border-color:var(--org)}
+dialog{border:0;border-radius:16px;padding:0;max-width:min(760px,94vw);width:100%;background:var(--bg);color:var(--ink);box-shadow:0 20px 60px #0006}
+dialog::backdrop{background:#0b1726aa}
+.dlg{padding:22px;display:flex;flex-direction:column;gap:12px}
+.map{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.map label{display:flex;flex-direction:column;font-size:13px;color:var(--mut);gap:4px}
+.map select,.map input{width:100%}
+.prev{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.prev table{font-size:12px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:9}
+.toast.on{opacity:1}
+pre,.scroll{overflow-x:auto}
+@media (prefers-reduced-motion:reduce){.meter i{transition:none}}
+@media(max-width:860px){.hero,.grid2{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:8em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:7.5em;margin-inline-start:-8em;white-space:normal;color:var(--mut)}.stack td:empty{display:none}}
+</style>
+<script>new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})</script>
+</head>
+<body>
+<header class="band top"><div class="wrap">
+  <h1 id="titulo">Control de toma de inventarios</h1>
+  <p class="sub" id="subt">Carga el maestro de códigos (Query Stock B2 y B7) y luego cada archivo de toma a medida que se realiza.</p>
+  <div class="bar">
+    <button class="btn pri" id="bTomas">+ Subir toma(s) de inventario</button>
+    <button class="btn" id="bMaestro">Cargar / actualizar maestro</button>
+    <button class="btn sm" id="bInstall" hidden>Instalar app</button>
+    <button class="btn sm" id="bBackup">Descargar respaldo</button>
+    <button class="btn sm" id="bRestore">Restaurar respaldo</button>
+    <span class="status" id="mStatus"></span>
+  </div>
+  <input type="file" id="fMaestro" accept=".xlsx,.xls,.csv" hidden>
+  <input type="file" id="fTomas" accept=".xlsx,.xls,.csv" multiple hidden>
+  <input type="file" id="fRestore" accept=".json" hidden>
+  <div class="hero">
+    <div class="gauge">
+      <div class="note">Cobertura de códigos tomados (grupos seleccionados)</div>
+      <div class="gtwo">
+        <div><div class="note"><b>Todos los códigos</b><br>incluye stock cero</div><div class="big" id="gPct">0%</div><div class="meter"><i id="gBar" style="width:0"></i></div><div class="note" id="gSub"></div></div>
+        <div><div class="note"><b>Solo códigos con stock</b><br>stock B2 + B7 &gt; 0</div><div class="big cs" id="gPct2">–</div><div class="meter o"><i id="gBar2" style="width:0"></i></div><div class="note" id="gSub2"></div></div>
+      </div>
+      <div class="kpis" id="kpis"></div>
+    </div>
+    <div class="chartcard">
+      <h3>Avance acumulado de la toma</h3>
+      <p class="proj" id="proj">Sube tomas para ver el ritmo y la fecha estimada del 100%.</p>
+      <div class="legend"><span><i style="background:var(--skyd)"></i>Todos los códigos</span><span><i style="background:var(--org)"></i>Solo con stock</span><span class="note">Punteado: proyección al 100% al ritmo actual</span></div>
+      <div class="fig"><svg id="chart" role="img" aria-label="Avance acumulado de cobertura por fecha"></svg></div>
+    </div>
+  </div>
+</div></header>
+
+<section class="band"><div class="wrap">
+  <h2>Grupos a controlar</h2>
+  <p class="note">Solo códigos <b>activos</b> del maestro. Desmarca los grupos que no se inventarían; la selección queda guardada.</p>
+  <div class="tools"><button class="btn sm" id="gAll">Marcar todos</button><button class="btn sm" id="gNone">Desmarcar todos</button><button class="btn sm" id="gTaken">Solo grupos con tomas</button></div>
+  <div class="chips" id="chips"><div class="empty">Carga el maestro para ver los grupos.</div></div>
+</div></section>
+
+<section class="band" style="padding-top:0"><div class="wrap">
+  <div class="tabs" role="tablist">
+    <button class="tab on" data-t="cob">Cobertura por grupo</button>
+    <button class="tab" data-t="dif">Diferencias</button>
+    <button class="tab" data-t="pend">Códigos pendientes</button>
+    <button class="tab" data-t="tomas">Tomas cargadas</button>
+  </div>
+
+  <div id="t-cob">
+    <div class="scroll"><table class="stack" id="tCob"></table></div>
+    <p class="note">Proyección por grupo: códigos pendientes del grupo ÷ ritmo del grupo (códigos tomados por día hábil desde la primera toma del grupo).</p>
+  </div>
+
+  <div id="t-dif" hidden>
+    <div class="grid2">
+      <div class="card"><h3>Grupos con mayor diferencia neta valorizada</h3><div id="difGrp" style="margin-top:12px"></div></div>
+      <div class="card"><h3>Resumen de diferencias</h3><div id="difRes" style="margin-top:12px"></div></div>
+    </div>
+    <h3 style="margin-top:26px">Códigos con diferencias</h3>
+    <div class="tools">
+      <select id="dGrupo"><option value="">Todos los grupos</option></select>
+      <select id="dSigno"><option value="">Faltantes y sobrantes</option><option value="-">Solo faltantes</option><option value="+">Solo sobrantes</option><option value="0">Incluir sin diferencia</option></select>
+      <select id="dOrden"><option value="val">Ordenar por $ diferencia</option><option value="uni">Ordenar por unidades</option><option value="pct">Ordenar por % diferencia</option></select>
+      <input type="text" id="dBus" placeholder="Buscar código o producto">
+      <button class="btn sm" id="dCopy">Copiar</button><button class="btn sm" id="dXls">Excel</button>
+    </div>
+    <div class="scroll"><table class="stack" id="tDif"></table></div>
+    <p class="note" id="dNote"></p>
+  </div>
+
+  <div id="t-pend" hidden>
+    <div class="tools">
+      <select id="pGrupo"><option value="">Todos los grupos</option></select>
+      <select id="pStock"><option value="">Con y sin stock</option><option value="cs">Solo con stock</option><option value="sc">Solo stock cero</option></select>
+      <input type="text" id="pBus" placeholder="Buscar código o producto">
+      <button class="btn sm" id="pCopy">Copiar</button><button class="btn sm" id="pXls">Excel</button>
+    </div>
+    <div class="scroll"><table class="stack" id="tPend"></table></div>
+    <p class="note" id="pNote"></p>
+  </div>
+
+  <div id="t-tomas" hidden>
+    <div class="scroll"><table class="stack" id="tTomas"></table></div>
+    <details style="margin-top:18px"><summary class="note" style="cursor:pointer">Códigos de las tomas que quedan fuera del control (inactivos, no existen en el maestro o de grupos desmarcados)</summary><div class="scroll"><table class="stack" id="tFuera"></table></div></details>
+  </div>
+</div></section>
+
+<dialog id="dlg"><form class="dlg" method="dialog" id="dlgForm">
+  <h3 id="dlgT">Confirmar toma</h3>
+  <p class="note" id="dlgInfo"></p>
+  <div class="map" id="dlgMap"></div>
+  <div class="prev" id="dlgPrev"></div>
+  <p class="note" id="dlgStats"></p>
+  <div class="bar" style="margin-top:4px;justify-content:flex-end">
+    <button class="btn sm" value="skip" id="dlgSkip">Omitir archivo</button>
+    <button class="btn pri sm" value="ok" id="dlgOk" style="background:var(--ink);color:var(--bg);border-color:var(--ink)">Cargar toma</button>
+  </div>
+</form></dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+{
+const KEY='petroflex_toma_inv_v1';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const nrm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim();
+const ck=v=>String(v??'').trim().toUpperCase();
+const fN=(n,d=0)=>n==null||isNaN(n)?'–':Number(n).toLocaleString('es-CL',{maximumFractionDigits:d,minimumFractionDigits:0});
+const fP=n=>n==null||isNaN(n)?'–':(n*100).toLocaleString('es-CL',{maximumFractionDigits:1})+'%';
+const f$=n=>n==null||isNaN(n)?'–':(n<0?'-$':'$')+Math.abs(Math.round(n)).toLocaleString('es-CL');
+const fD=s=>{if(!s)return'–';const[y,m,d]=s.split('-');return `${d}/${m}/${y}`};
+const num=v=>{if(v==null||v==='')return null;if(typeof v==='number')return v;let s=String(v).trim().replace(/\$|\s/g,'');if(/,\d{1,3}$/.test(s)&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');else if(/^-?\d+,\d+$/.test(s))s=s.replace(',','.');const n=Number(s);return isNaN(n)?null:n};
+const toast=m=>{const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),2600)};
+
+let S={maestro:null,tomas:[],excl:['MATERIAS PRIMAS']};
+try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('No se pudo guardar en este navegador; usa "Descargar respaldo".')}};
+
+/* ---------- lectura de Excel ---------- */
+const readWB=file=>new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>{try{res(XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true}))}catch(err){rej(err)}};r.onerror=rej;r.readAsArrayBuffer(file)});
+const rowsOf=ws=>XLSX.utils.sheet_to_json(ws,{header:1,defval:null,blankrows:false,raw:true});
+
+function parseMaestro(wb){
+  for(const name of wb.SheetNames){
+    const rows=rowsOf(wb.Sheets[name]);
+    for(let i=0;i<Math.min(15,rows.length);i++){
+      const h=(rows[i]||[]).map(nrm);
+      const ic=h.findIndex(x=>/^(codigo|cod\.? ?producto|cod)$/.test(x));
+      const ia=h.findIndex(x=>/^(activo|estado|vigente)/.test(x));
+      if(ic<0||ia<0)continue;
+      const ig=h.findIndex(x=>x.includes('grupo')&&!x.includes('sub')&&!x.startsWith('cod'));
+      const isg=h.findIndex(x=>(x.includes('subgrupo')||x.includes('sub grupo'))&&!x.startsWith('cod'));
+      const id=h.findIndex(x=>(x.startsWith('descrip')||x==='producto')&&!x.includes('grupo'));
+      const iu=h.findIndex(x=>x.startsWith('unidad')||x==='um');
+      const ist=h.map((x,k)=>/^stock/.test(x)?k:-1).filter(k=>k>=0);
+      const act=[],inact=[];
+      for(let r=i+1;r<rows.length;r++){const row=rows[r];if(!row)continue;const c=ck(row[ic]);if(!c)continue;
+        const a=nrm(row[ia]);const isAct=a==='activo'||a==='s'||a==='si'||a==='1'||a==='true'||a==='vigente';
+        if(isAct)act.push([c,String(row[id]??'').trim(),iu>=0?String(row[iu]??''):'',String(row[ig]??'').trim()||'SIN GRUPO',isg>=0?String(row[isg]??'').trim():'',ist.length?ist.reduce((t,k)=>t+(num(row[k])||0),0):null]);else inact.push(c)}
+      if(act.length)return{act,inact};
+    }
+  }
+  throw new Error('No encontré columnas "Codigo" y "Activo" en el archivo.');
+}
+
+function analyzeSheet(rows){
+  for(let i=0;i<Math.min(20,rows.length);i++){
+    const raw=rows[i]||[];const h=raw.map(nrm);
+    const ic=h.findIndex(x=>x.includes('cod')&&!/bodega|grupo|medida|sub|barra/.test(x));
+    if(ic<0)continue;
+    const width=Math.max(...rows.slice(i,i+60).map(r=>(r||[]).length));
+    const find=re=>h.findIndex((x,k)=>k!==ic&&re.test(x));
+    const ip=find(/producto|descrip|nombre|detalle/);
+    const is=find(/stock|disponible|sistema|saldo|teorico|existencia/);
+    let ii=find(/inventario|conteo|fisico|contado|toma|real/);
+    const io=find(/costo ?unit|costo|precio/);
+    const data=rows.slice(i+1).filter(r=>r&&/\d/.test(ck(r[ic]))&&!/bodega|total/i.test(String(r[ic])));
+    if(ii<0&&is>=0){for(let k=is+1;k<width;k++){if(h[k])continue;const nums=data.filter(r=>typeof r[k]==='number').length;if(data.length&&nums/data.length>=.5){ii=k;break}}}
+    return{hdr:i,ic,ip,is,ii,io,width,heads:Array.from({length:width},(_,k)=>String(raw[k]??'').trim()),n:data.length};
+  }
+  return null;
+}
+
+function extractToma(rows,m){
+  const agg=new Map();let bod='';
+  for(let r=m.hdr+1;r<rows.length;r++){const row=rows[r];if(!row)continue;
+    const first=String(row[m.ic]??row[0]??'');const bm=first.match(/bodega\s*(\d+)/i)||String(row[0]??'').match(/bodega\s*(\d+)/i);
+    if(bm){bod='B'+bm[1];continue}
+    const c=ck(row[m.ic]);if(!c||!/\d/.test(c)||/total/i.test(c))continue;
+    const st=m.is>=0?num(row[m.is]):null,ct=m.ii>=0?num(row[m.ii]):null,co=m.io>=0?num(row[m.io]):null;
+    const o=agg.get(c)||{c,d:m.ip>=0?String(row[m.ip]??'').trim():'',st:null,ct:null,co:null,b:[]};
+    if(st!=null)o.st=(o.st||0)+st;if(ct!=null)o.ct=(o.ct||0)+ct;if(co!=null&&o.co==null)o.co=co;
+    const bl=bod||'B2';if(!o.b.includes(bl))o.b.push(bl);
+    agg.set(c,o);
+  }
+  return[...agg.values()];
+}
+
+const dateFromName=n=>{let m=n.match(/(\d{1,2})[._-](\d{1,2})[._-](\d{4})/);if(m)return`${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;m=n.match(/(\d{4})[._-](\d{1,2})[._-](\d{1,2})/);if(m)return`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;return null};
+const today=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+
+/* ---------- diálogo de confirmación por archivo ---------- */
+function confirmFile(file,wb){
+  return new Promise(resolve=>{
+    const sheets=wb.SheetNames.map(n=>{const rows=rowsOf(wb.Sheets[n]);return{n,rows,m:analyzeSheet(rows)}}).filter(s=>s.m);
+    if(!sheets.length){toast(`"${file.name}": no encontré una columna de código.`);return resolve(null)}
+    sheets.sort((a,b)=>((b.m.ii>=0)-(a.m.ii>=0))||(a.m.n-b.m.n));
+    let cur=sheets[0];const m=()=>cur.m;
+    const fecha=dateFromName(file.name)||today();
+    $('dlgT').textContent='Confirmar toma: '+file.name;
+    $('dlgInfo').textContent='Revisa que las columnas detectadas sean las correctas. El conteo físico es obligatorio para calcular diferencias; sin él solo cuenta para cobertura.';
+    const opt=(sel)=>`<option value="-1">— ninguna —</option>`+m().heads.map((h,k)=>`<option value="${k}" ${k===sel?'selected':''}>${esc(XLSX.utils.encode_col(k))}: ${esc(h||'(sin título)')}</option>`).join('');
+    const draw=()=>{
+      $('dlgMap').innerHTML=`<label>Hoja<select id="mSh">${sheets.map((s,k)=>`<option value="${k}" ${s===cur?'selected':''}>${esc(s.n)} (${s.m.n} filas)</option>`).join('')}</select></label>
+      <label>Fecha de la toma<input type="date" id="mF" value="${fecha}"></label>
+      <label>Código<select id="mC">${opt(m().ic)}</select></label>
+      <label>Producto<select id="mP">${opt(m().ip)}</select></label>
+      <label>Stock sistema<select id="mS">${opt(m().is)}</select></label>
+      <label>Conteo físico<select id="mI">${opt(m().ii)}</select></label>
+      <label>Costo unitario<select id="mO">${opt(m().io)}</select></label>`;
+      $('mSh').onchange=e=>{cur=sheets[+e.target.value];draw()};
+      for(const[id,k]of[['mC','ic'],['mP','ip'],['mS','is'],['mI','ii'],['mO','io']])$(id).onchange=e=>{cur.m[k]=+e.target.value;stats()};
+      stats();
+    };
+    const stats=()=>{
+      const rows=extractToma(cur.rows,cur.m);const M=master();
+      const enM=rows.filter(r=>M.map.has(r.c)).length;
+      $('dlgPrev').innerHTML=`<table><thead><tr><th>Código</th><th>Producto</th><th>Bod.</th><th class="n">Stock</th><th class="n">Conteo</th><th class="n">Dif</th></tr></thead><tbody>${rows.slice(0,8).map(r=>`<tr><td>${esc(r.c)}</td><td>${esc(r.d)}</td><td>${esc(r.b.join('+'))}</td><td class="n">${fN(r.st,2)}</td><td class="n">${fN(r.ct,2)}</td><td class="n">${r.st!=null&&r.ct!=null?fN(r.ct-r.st,2):'–'}</td></tr>`).join('')}</tbody></table>`;
+      $('dlgStats').textContent=`${rows.length} códigos únicos en la hoja · ${M.map.size?enM+' activos en el maestro':'(sin maestro cargado)'}${cur.m.ii<0?' · sin columna de conteo':''}`;
+      cur.rows_=rows;
+    };
+    draw();
+    const dlg=$('dlg');
+    dlg.onclose=()=>{if(dlg.returnValue==='ok'){resolve({id:Date.now()+Math.random(),nombre:file.name,hoja:cur.n,fecha:$('mF').value||fecha,cargado:new Date().toISOString(),filas:cur.rows_.map(r=>[r.c,r.d,r.st,r.ct,r.co,r.b.join('+')])})}else resolve(null)};
+    dlg.returnValue='';dlg.showModal();
+  });
+}
+
+/* ---------- modelo calculado ---------- */
+let MC=null;
+function master(){
+  if(MC&&MC.src===S.maestro)return MC;
+  const map=new Map(),grupos=new Map();
+  if(S.maestro){for(const a of S.maestro.act){map.set(a[0],{c:a[0],d:a[1],um:a[2],g:a[3],sg:a[4],stk:a[5]??null});grupos.set(a[3],(grupos.get(a[3])||0)+1)}}
+  MC={src:S.maestro,map,grupos,inact:new Set(S.maestro?.inact||[]),hasStk:!!S.maestro&&S.maestro.act.some(a=>a[5]!=null)};return MC;
+}
+const workdays=(a,b)=>{let n=0;const d=new Date(a+'T12:00'),e=new Date(b+'T12:00');while(d<=e){const w=d.getDay();if(w&&w<6)n++;d.setDate(d.getDate()+1)}return Math.max(n,1)};
+const addWorkdays=(a,n)=>{const d=new Date(a+'T12:00');let k=0;while(k<Math.ceil(n)){d.setDate(d.getDate()+1);const w=d.getDay();if(w&&w<6)k++}return d.toISOString().slice(0,10)};
+
+function compute(){
+  const M=master();const excl=new Set(S.excl);
+  const uni=[...M.map.values()].filter(x=>!excl.has(x.g));
+  const uniSet=new Set(uni.map(x=>x.c));
+  const tomas=[...S.tomas].sort((a,b)=>a.fecha.localeCompare(b.fecha)||a.cargado.localeCompare(b.cargado));
+  const last=new Map(),first=new Map(),times=new Map(),fuera=new Map();
+  const perToma=new Map();
+  for(const t of tomas){let nuevos=0,enU=0;
+    for(const f of t.filas){const[c,d,st,ct,co,b]=f;
+      if(!uniSet.has(c)){if(!fuera.has(c))fuera.set(c,{c,d,t:t.nombre,why:M.map.has(c)?'Grupo desmarcado ('+M.map.get(c).g+')':M.inact.has(c)?'Inactivo':'No existe en maestro'});continue}
+      enU++;if(!first.has(c)){first.set(c,t.fecha);nuevos++}
+      times.set(c,(times.get(c)||0)+1);
+      last.set(c,{c,st,ct,co,b,fecha:t.fecha,toma:t.nombre,dDoc:d})}
+    perToma.set(t.id,{enU,nuevos})}
+  const det=[...last.values()].map(x=>{const m=M.map.get(x.c);const dif=x.st!=null&&x.ct!=null?x.ct-x.st:null;
+    return{...x,d:m.d||x.dDoc,g:m.g,sg:m.sg,um:m.um,dif,pct:dif!=null&&x.st?dif/Math.abs(x.st):(dif?1:0),val:dif!=null&&x.co!=null?dif*x.co:null,rec:times.get(x.c)>1}});
+  // con stock: stock B2+B7 del maestro > 0, o código contado que tenía stock en sistema o físico
+  for(const x of uni){const l=last.get(x.c);x.cs=(x.stk||0)>0||!!(l&&((l.st||0)>0||(l.ct||0)>0))}
+  const csSet=new Set(uni.filter(x=>x.cs).map(x=>x.c));
+  for(const x of det)x.cs=csSet.has(x.c);
+  // grupos
+  const G=new Map();for(const x of uni){const g=G.get(x.g)||{g:x.g,tot:0,tom:0,totCS:0,tomCS:0,cdif:0,neto:0,fal:0,sob:0,eval:0,first:null};g.tot++;if(x.cs)g.totCS++;G.set(x.g,g)}
+  for(const x of det){const g=G.get(x.g);g.tom++;if(x.cs)g.tomCS++;if(x.ct!=null&&x.st!=null){g.eval++;if(Math.abs(x.dif)>1e-9)g.cdif++}if(x.val!=null){g.neto+=x.val;if(x.val<0)g.fal+=x.val;else g.sob+=x.val}const f=first.get(x.c);if(!g.first||f<g.first)g.first=f}
+  const fechas=[...new Set(tomas.map(t=>t.fecha))].sort();
+  const lastDate=fechas[fechas.length-1];
+  for(const g of G.values()){g.pct=g.tot?g.tom/g.tot:0;g.pctCS=g.totCS?g.tomCS/g.totCS:null;if(g.first&&g.tom<g.tot){const r=g.tom/workdays(g.first,lastDate);g.proj=addWorkdays(lastDate,(g.tot-g.tom)/r)}}
+  // timeline
+  const firstArr=[...first.values()];
+  const firstCS=[...first.entries()].filter(([c])=>csSet.has(c)).map(e=>e[1]);
+  const tl=fechas.map(f=>({f,n:firstArr.filter(x=>x<=f).length,ncs:firstCS.filter(x=>x<=f).length}));
+  return{totCS:csSet.size,tomCS:det.filter(x=>x.cs).length,M,uni,det,G:[...G.values()],tomas,perToma,fuera:[...fuera.values()],tl,fechas,first};
+}
+
+/* ---------- render ---------- */
+let R=null;const sortCob={k:'pct',d:-1};
+function render(){
+  const M=master();
+  $('mStatus').textContent=S.maestro?`Maestro: ${S.maestro.nombre} · ${fN(M.map.size)} códigos activos · cargado ${new Date(S.maestro.cargado).toLocaleDateString('es-CL')}`:'Sin maestro cargado';
+  R=compute();const{uni,det,G,tl,fechas}=R;
+  const tot=uni.length,tom=det.length,pct=tot?tom/tot:0;
+  const evals=det.filter(x=>x.dif!=null),cdif=evals.filter(x=>Math.abs(x.dif)>1e-9);
+  const neto=det.reduce((s,x)=>s+(x.val||0),0);
+  const{totCS,tomCS}=R;const pctCS=totCS?tomCS/totCS:0;
+  $('gPct').textContent=fP(pct);$('gBar').style.width=(pct*100).toFixed(1)+'%';
+  $('gSub').textContent=`${fN(tom)} de ${fN(tot)} tomados · ${fN(tot-tom)} pendientes`;
+  if(M.map.size&&!M.hasStk){$('gPct2').textContent='–';$('gBar2').style.width='0';$('gSub2').textContent='Vuelve a cargar el maestro para calcular esta cobertura (la versión guardada no trae stock).'}
+  else{$('gPct2').textContent=fP(pctCS);$('gBar2').style.width=(pctCS*100).toFixed(1)+'%';$('gSub2').textContent=`${fN(tomCS)} de ${fN(totCS)} tomados · ${fN(totCS-tomCS)} pendientes`}
+  $('kpis').innerHTML=[[fN(tot-totCS),'Códigos con stock cero (en control)'],[fN((tot-totCS)-(tom-tomCS)),'Stock cero aún sin tomar'],[fP(evals.length?1-cdif.length/evals.length:null),'Exactitud (códigos sin diferencia)'],[fN(cdif.length),'Códigos con diferencia'],[fN(evals.length-cdif.length),'Códigos sin diferencia'],[f$(neto),'Diferencia neta valorizada']].map(([b,s])=>`<div><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join('');
+  $('subt').textContent=fechas.length?`${R.tomas.length} toma(s) cargadas entre el ${fD(fechas[0])} y el ${fD(fechas[fechas.length-1])} · ${G.filter(g=>g.tom).length} de ${G.length} grupos con códigos tomados.`:'Carga el maestro de códigos (Query Stock B2 y B7) y luego cada archivo de toma a medida que se realiza.';
+  // proyección
+  if(fechas.length&&tom){const wd=workdays(fechas[0],fechas[fechas.length-1]);const rate=tom/wd;
+    if(tom>=tot)$('proj').innerHTML=`<b>100% completado</b> en ${wd} día(s) hábil(es).`;
+    else{const lf=fechas[fechas.length-1],rest=(tot-tom)/rate;let t=`Ritmo: <b>${fN(rate,1)} códigos por día hábil</b> (${wd} día(s) hábil(es) desde la primera toma). Todos los códigos: faltan <b>${fN(Math.ceil(rest))} días hábiles</b>, 100% cerca del <b>${fD(addWorkdays(lf,rest))}</b>.`;
+      if(M.hasStk&&totCS){if(tomCS>=totCS)t+=` Con stock: <b>100% completado</b>.`;else if(tomCS){const r2=(totCS-tomCS)/(tomCS/wd);t+=` Solo con stock (${fN(tomCS/wd,1)}/día): faltan <b>${fN(Math.ceil(r2))} días hábiles</b>, 100% cerca del <b>${fD(addWorkdays(lf,r2))}</b>.`}}
+      $('proj').innerHTML=t}}
+  else $('proj').textContent='Sube tomas para ver el ritmo y la fecha estimada del 100%.';
+  drawChart();renderChips();renderCob();renderDif();renderPend();renderTomas();
+}
+
+const chart=$('chart');
+function drawChart(){
+  if(!R)return;const W=chart.clientWidth,H=chart.clientHeight;if(!W||!H)return;
+  const{tl,uni,totCS}=R;const tot=uni.length;const sm=W<520;
+  const pl=sm?34:44,pr=14,pt=20,pb=28;const iw=W-pl-pr,ih=H-pt-pb;
+  if(!tl.length||!tot){chart.innerHTML=`<text x="${W/2}" y="${H/2}" text-anchor="middle" fill="currentColor" opacity=".5" font-size="14">Sin tomas cargadas</text>`;return}
+  const T=f=>new Date(f+'T12:00').getTime();
+  const d0=T(tl[0].f),lastF=tl[tl.length-1].f,wd=workdays(tl[0].f,lastF);
+  const series=[{k:'n',tot,col:'var(--skyd)',name:'Todos'}];
+  if(master().hasStk&&totCS)series.push({k:'ncs',tot:totCS,col:'var(--org)',name:'Con stock'});
+  let d1=T(lastF);
+  for(const se of series){const n=tl[tl.length-1][se.k];se.pct=n/se.tot;if(se.pct<1&&n){se.proj=T(addWorkdays(lastF,(se.tot-n)/(n/wd)));d1=Math.max(d1,se.proj)}}
+  if(d1===d0)d1=d0+864e5;
+  const x=t=>pl+(t-d0)/(d1-d0)*iw,y=v=>pt+ih-v*ih;
+  let s='';
+  for(const v of[0,.25,.5,.75,1]){const yy=y(v);s+=`<line x1="${pl}" x2="${W-pr}" y1="${yy}" y2="${yy}" stroke="currentColor" opacity=".12"/><text x="${pl-6}" y="${yy+4}" text-anchor="end" font-size="11" fill="currentColor" opacity=".6">${v*100}%</text>`}
+  const ends=[];
+  series.forEach((se,si)=>{let path='',px=null;
+    tl.forEach((p,i)=>{const xx=x(T(p.f)),yy=y(p[se.k]/se.tot);path+=i?`H${xx}V${yy}`:`M${xx},${y(0)}V${yy}`;px=[xx,yy]});
+    if(si===0)s+=`<path d="${path}V${y(0)}Z" fill="var(--sky)" opacity=".16"/>`;
+    s+=`<path d="${path}" fill="none" stroke="${se.col}" stroke-width="2.5"/>`;
+    if(se.proj)s+=`<line x1="${px[0]}" y1="${px[1]}" x2="${x(se.proj)}" y2="${y(1)}" stroke="${se.col}" stroke-width="1.8" stroke-dasharray="6 5" opacity=".85"/><circle cx="${x(se.proj)}" cy="${y(1)}" r="4.5" fill="${se.col}"><title>${se.name}: 100% estimado ${fD(new Date(se.proj).toISOString().slice(0,10))}</title></circle>`;
+    tl.forEach(p=>{s+=`<circle cx="${x(T(p.f))}" cy="${y(p[se.k]/se.tot)}" r="3.5" fill="${se.col}"><title>${se.name} · ${fD(p.f)}: ${p[se.k]} de ${se.tot} (${fP(p[se.k]/se.tot)})</title></circle>`});
+    ends.push({x:px[0],y:px[1],t:fP(se.pct),col:se.col})});
+  // etiquetas del último punto sin superponerse
+  ends.sort((a,b)=>a.y-b.y);for(let i=1;i<ends.length;i++)if(ends[i].y-ends[i-1].y<16)ends[i].y=ends[i-1].y+16;
+  for(const e of ends)s+=`<text x="${Math.min(e.x+8,W-pr-50)}" y="${Math.max(e.y-6,pt+10)}" font-size="13" font-weight="700" fill="${e.col}">${e.t}</text>`;
+  let lastLbl=-1e9;
+  tl.forEach((p,i)=>{const xx=x(T(p.f));if(xx-lastLbl>=42&&(lastLbl=xx))s+=`<text x="${xx}" y="${H-8}" text-anchor="${i===0?'start':'middle'}" font-size="11" fill="currentColor" opacity=".7">${fD(p.f).slice(0,5)}</text>`});
+  chart.innerHTML=s;
+}
+const ro=new ResizeObserver(drawChart);ro.observe(chart);
+
+function renderChips(){
+  const M=master();if(!M.map.size){$('chips').innerHTML='<div class="empty">Carga el maestro para ver los grupos.</div>';return}
+  const taken=new Map();for(const t of S.tomas)for(const f of t.filas){const m=M.map.get(f[0]);if(m)taken.set(m.g,1)}
+  const gs=[...M.grupos.entries()].sort((a,b)=>b[1]-a[1]);const ex=new Set(S.excl);
+  $('chips').innerHTML=gs.map(([g,n])=>`<label class="chip ${ex.has(g)?'off':''}"><input type="checkbox" data-g="${esc(g)}" ${ex.has(g)?'':'checked'}>${esc(g)} <small>${fN(n)}${taken.has(g)?' · con tomas':''}</small></label>`).join('');
+}
+$('chips').addEventListener('change',e=>{const g=e.target.dataset.g;if(g==null)return;const s=new Set(S.excl);e.target.checked?s.delete(g):s.add(g);S.excl=[...s];save();render()});
+$('gAll').onclick=()=>{S.excl=[];save();render()};
+$('gNone').onclick=()=>{S.excl=[...master().grupos.keys()];save();render()};
+$('gTaken').onclick=()=>{const M=master();const t=new Set();for(const x of S.tomas)for(const f of x.filas){const m=M.map.get(f[0]);if(m)t.add(m.g)}S.excl=[...M.grupos.keys()].filter(g=>!t.has(g));save();render()};
+
+function renderCob(){
+  const G=[...R.G].sort((a,b)=>{const k=sortCob.k;const va=a[k]??'',vb=b[k]??'';return(typeof va==='string'?va.localeCompare(vb):va-vb)*sortCob.d});
+  const th=(k,l,n)=>`<th class="s ${n?'n':''}" data-k="${k}">${l}${sortCob.k===k?(sortCob.d>0?' ▲':' ▼'):''}</th>`;
+  $('tCob').innerHTML=G.length?`<thead><tr>${th('g','Grupo')}${th('tot','Códigos',1)}${th('tom','Tomados',1)}${th('pct','Cobertura total')}${th('totCS','Con stock',1)}${th('tomCS','Tomados c/stock',1)}${th('pctCS','Cobertura c/stock')}${th('cdif','Con dif.',1)}${th('neto','Dif. neta $',1)}${th('proj','Proy. 100%',1)}</tr></thead><tbody>${G.map(g=>`<tr><td><b>${esc(g.g)}</b></td><td class="n">${fN(g.tot)}</td><td class="n">${fN(g.tom)}</td><td><div class="rowbar"><div class="meter"><i style="width:${(g.pct*100).toFixed(1)}%"></i></div><em>${fP(g.pct)}</em></div></td><td class="n">${fN(g.totCS)}</td><td class="n">${fN(g.tomCS)}</td><td>${g.totCS?`<div class="rowbar"><div class="meter o"><i style="width:${(g.pctCS*100).toFixed(1)}%"></i></div><em>${fP(g.pctCS)}</em></div>`:'<span class="note">sin stock</span>'}</td><td class="n">${g.cdif?`<span class="neg">${fN(g.cdif)}</span>`:fN(g.cdif)}</td><td class="n ${g.neto<0?'neg':''}">${f$(g.neto)}</td><td class="n">${g.tom>=g.tot?'<span class="pos">Completo</span>':g.proj?fD(g.proj):'–'}</td></tr>`).join('')}</tbody><tfoot><tr><td><b>Total</b></td><td class="n"><b>${fN(R.uni.length)}</b></td><td class="n"><b>${fN(R.det.length)}</b></td><td><b>${fP(R.uni.length?R.det.length/R.uni.length:0)}</b></td><td class="n"><b>${fN(R.totCS)}</b></td><td class="n"><b>${fN(R.tomCS)}</b></td><td><b>${fP(R.totCS?R.tomCS/R.totCS:null)}</b></td><td class="n"><b>${fN(R.G.reduce((s,g)=>s+g.cdif,0))}</b></td><td class="n"><b>${f$(R.G.reduce((s,g)=>s+g.neto,0))}</b></td><td></td></tr></tfoot>`:'<tr><td><div class="empty">Sin grupos seleccionados o sin maestro.</div></td></tr>';
+}
+$('tCob').addEventListener('click',e=>{const k=e.target.closest('th')?.dataset.k;if(!k)return;sortCob.d=sortCob.k===k?-sortCob.d:(k==='g'?1:-1);sortCob.k=k;renderCob()});
+
+const fillSel=(id)=>{const s=$(id),v=s.value;s.innerHTML='<option value="">Todos los grupos</option>'+R.G.filter(g=>id==='pGrupo'?g.tom<g.tot:g.tom).map(g=>`<option ${g.g===v?'selected':''}>${esc(g.g)}</option>`).join('')};
+let difRows=[];
+function renderDif(){
+  fillSel('dGrupo');
+  const gg=R.G.filter(g=>g.cdif>0).sort((a,b)=>Math.abs(b.neto)-Math.abs(a.neto));const mx=Math.abs(gg[0]?.neto)||1;
+  $('difGrp').innerHTML=gg.length?gg.slice(0,10).map(g=>`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:10px;font-size:14px"><b>${esc(g.g)}</b><span class="n ${g.neto<0?'neg':'pos'}">${f$(g.neto)}</span></div><div class="meter ${g.neto<0?'o':''}" style="height:10px"><i style="width:${(Math.abs(g.neto)/mx*100).toFixed(1)}%"></i></div><div class="note">Faltantes ${f$(g.fal)} · sobrantes ${f$(g.sob)} · ${fN(g.cdif)} de ${fN(g.eval)} códigos con diferencia · exactitud ${fP(g.eval?1-g.cdif/g.eval:null)}</div></div>`).join(''):'<div class="empty">Aún no hay diferencias valorizadas.</div>';
+  const ev=R.det.filter(x=>x.dif!=null);const fal=ev.filter(x=>x.dif<-1e-9),sob=ev.filter(x=>x.dif>1e-9);
+  const sum=a=>a.reduce((s,x)=>s+(x.val||0),0);
+  $('difRes').innerHTML=`<table><tbody><tr><td>Códigos contados con stock y conteo</td><td class="n">${fN(ev.length)}</td></tr><tr><td>Sin diferencia</td><td class="n pos">${fN(ev.length-fal.length-sob.length)}</td></tr><tr><td>Faltantes (conteo &lt; sistema)</td><td class="n neg">${fN(fal.length)} · ${f$(sum(fal))}</td></tr><tr><td>Sobrantes (conteo &gt; sistema)</td><td class="n">${fN(sob.length)} · ${f$(sum(sob))}</td></tr><tr><td><b>Diferencia neta</b></td><td class="n"><b>${f$(sum(ev))}</b></td></tr><tr><td>Códigos recontados (en más de una toma)</td><td class="n">${fN(R.det.filter(x=>x.rec).length)}</td></tr></tbody></table><p class="note">Diferencia = conteo físico − stock sistema del archivo de toma. Valorizada con el costo unitario del mismo archivo. Si un código se contó en varias tomas se usa la más reciente.</p>`;
+  const g=$('dGrupo').value,sg=$('dSigno').value,q=nrm($('dBus').value),o=$('dOrden').value;
+  difRows=R.det.filter(x=>x.dif!=null&&(!g||x.g===g)&&(sg==='0'||(sg==='-'?x.dif<-1e-9:sg==='+'?x.dif>1e-9:Math.abs(x.dif)>1e-9))&&(!q||nrm(x.c+' '+x.d).includes(q)));
+  const key=o==='uni'?x=>Math.abs(x.dif):o==='pct'?x=>Math.abs(x.pct):x=>Math.abs(x.val??0);
+  difRows.sort((a,b)=>key(b)-key(a));
+  const show=difRows.slice(0,300);
+  $('tDif').innerHTML=`<thead><tr><th>Código</th><th>Producto</th><th>Grupo</th><th>Bod.</th><th>Fecha</th><th class="n">Stock</th><th class="n">Conteo</th><th class="n">Dif.</th><th class="n">Dif. %</th><th class="n">Dif. $</th></tr></thead><tbody>${show.map(x=>`<tr><td><b>${esc(x.c)}</b></td><td>${esc(x.d)}</td><td>${esc(x.g)}</td><td>${esc(x.b)}</td><td>${fD(x.fecha)}</td><td class="n">${fN(x.st,2)}</td><td class="n">${fN(x.ct,2)}</td><td class="n ${x.dif<0?'neg':x.dif>0?'pos':''}">${fN(x.dif,2)}</td><td class="n">${fP(x.pct)}</td><td class="n ${x.val<0?'neg':''}">${f$(x.val)}</td></tr>`).join('')||'<tr><td colspan="10"><div class="empty">Sin códigos para este filtro.</div></td></tr>'}</tbody>`;
+  $('dNote').textContent=difRows.length>300?`Mostrando 300 de ${fN(difRows.length)}; Copiar y Excel incluyen todos.`:`${fN(difRows.length)} código(s).`;
+}
+for(const id of['dGrupo','dSigno','dOrden'])$(id).onchange=renderDif;$('dBus').oninput=renderDif;
+
+let pendRows=[];
+function renderPend(){
+  fillSel('pGrupo');const g=$('pGrupo').value,q=nrm($('pBus').value);
+  const done=new Set(R.det.map(x=>x.c));
+  const ps=$('pStock').value;
+  pendRows=R.uni.filter(x=>!done.has(x.c)&&(!g||x.g===g)&&(!ps||(ps==='cs')===x.cs)&&(!q||nrm(x.c+' '+x.d).includes(q))).sort((a,b)=>a.g.localeCompare(b.g)||a.sg.localeCompare(b.sg)||a.c.localeCompare(b.c));
+  $('tPend').innerHTML=`<thead><tr><th>Código</th><th>Producto</th><th>UM</th><th>Grupo</th><th>Subgrupo</th><th class="n">Stock B2+B7</th></tr></thead><tbody>${pendRows.slice(0,400).map(x=>`<tr><td><b>${esc(x.c)}</b></td><td>${esc(x.d)}</td><td>${esc(x.um)}</td><td>${esc(x.g)}</td><td>${esc(x.sg)}</td><td class="n">${x.stk==null?'–':fN(x.stk,2)}</td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">No hay códigos pendientes con este filtro.</div></td></tr>'}</tbody>`;
+  $('pNote').textContent=pendRows.length>400?`Mostrando 400 de ${fN(pendRows.length)}; Copiar y Excel incluyen todos.`:`${fN(pendRows.length)} código(s) pendientes.`;
+}
+$('pGrupo').onchange=renderPend;$('pStock').onchange=renderPend;$('pBus').oninput=renderPend;
+
+function renderTomas(){
+  const ts=[...R.tomas].reverse();
+  $('tTomas').innerHTML=`<thead><tr><th>Fecha</th><th>Archivo</th><th class="n">Códigos</th><th class="n">En control</th><th class="n">Nuevos</th><th class="n">Dif. $ neta</th><th></th></tr></thead><tbody>${ts.map(t=>{const p=R.perToma.get(t.id)||{};const v=t.filas.reduce((s,f)=>s+(f[2]!=null&&f[3]!=null&&f[4]!=null?(f[3]-f[2])*f[4]:0),0);
+    return`<tr><td>${fD(t.fecha)}</td><td>${esc(t.nombre)}<div class="note">hoja ${esc(t.hoja)}</div></td><td class="n">${fN(t.filas.length)}</td><td class="n">${fN(p.enU)}</td><td class="n">${fN(p.nuevos)}</td><td class="n ${v<0?'neg':''}">${f$(v)}</td><td><button class="btn sm" data-del="${t.id}">Quitar</button></td></tr>`}).join('')||'<tr><td colspan="7"><div class="empty">Aún no hay tomas. Usa "Subir toma(s) de inventario".</div></td></tr>'}</tbody>`;
+  $('tFuera').innerHTML=`<thead><tr><th>Código</th><th>Producto</th><th>Motivo</th><th>Archivo</th></tr></thead><tbody>${R.fuera.map(x=>`<tr><td>${esc(x.c)}</td><td>${esc(x.d)}</td><td>${esc(x.why)}</td><td>${esc(x.t)}</td></tr>`).join('')||'<tr><td colspan="4" class="note">Ninguno.</td></tr>'}</tbody>`;
+}
+let pendingDel=null;
+$('tTomas').addEventListener('click',e=>{const b=e.target.closest('[data-del]');if(!b)return;const id=+b.dataset.del;
+  if(pendingDel!==id){pendingDel=id;b.textContent='¿Confirmar?';b.style.color='var(--org)';setTimeout(()=>{if(pendingDel===id){pendingDel=null;renderTomas()}},3000);return}
+  S.tomas=S.tomas.filter(t=>t.id!==id);pendingDel=null;save();render();toast('Toma eliminada')});
+
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===b));for(const t of['cob','dif','pend','tomas'])$('t-'+t).hidden=t!==b.dataset.t});
+
+/* ---------- exportar ---------- */
+const difCols=()=>[['Código','Producto','Grupo','Subgrupo','Bodega','Fecha toma','Stock sistema','Conteo','Diferencia','Dif %','Costo unit.','Dif $'],...difRows.map(x=>[x.c,x.d,x.g,x.sg,x.b,x.fecha,x.st,x.ct,x.dif,x.pct,x.co,x.val])];
+const pendCols=()=>[['Código','Producto','UM','Grupo','Subgrupo','Stock B2+B7'],...pendRows.map(x=>[x.c,x.d,x.um,x.g,x.sg,x.stk])];
+const copy=async a=>{try{await navigator.clipboard.writeText(a.map(r=>r.map(v=>v??'').join('\t')).join('\n'));toast('Copiado: pégalo en Excel')}catch(e){toast('No se pudo copiar en este navegador')}};
+const xls=(a,n)=>{try{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(a),'Datos');XLSX.writeFile(wb,n)}catch(e){toast('Descarga bloqueada aquí; usa Copiar')}};
+$('dCopy').onclick=()=>copy(difCols());$('dXls').onclick=()=>xls(difCols(),`Diferencias_inventario_${today()}.xlsx`);
+$('pCopy').onclick=()=>copy(pendCols());$('pXls').onclick=()=>xls(pendCols(),`Codigos_pendientes_${today()}.xlsx`);
+$('bBackup').onclick=()=>{try{const b=new Blob([JSON.stringify(S)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`respaldo_toma_inventarios_${today()}.json`;document.body.appendChild(a);a.click();a.remove()}catch(e){toast('Descarga bloqueada aquí')}};
+$('bRestore').onclick=()=>$('fRestore').click();
+$('fRestore').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{const d=JSON.parse(await f.text());if(!('tomas'in d))throw 0;S=Object.assign({maestro:null,tomas:[],excl:[]},d);save();render();toast('Respaldo restaurado')}catch(err){toast('El archivo no es un respaldo válido')}};
+
+/* ---------- cargas ---------- */
+$('bMaestro').onclick=()=>$('fMaestro').click();
+$('fMaestro').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;$('mStatus').textContent='Leyendo maestro…';
+  try{const wb=await readWB(f);const{act,inact}=parseMaestro(wb);S.maestro={nombre:f.name,cargado:new Date().toISOString(),act,inact};save();render();toast(`Maestro actualizado: ${fN(act.length)} códigos activos`)}catch(err){toast(err.message||'No se pudo leer el maestro');render()}};
+$('bTomas').onclick=()=>{if(!S.maestro)toast('Primero carga el maestro de códigos');$('fTomas').click()};
+$('fTomas').onchange=async e=>{const files=[...e.target.files];e.target.value='';let n=0;
+  for(const f of files){try{const wb=await readWB(f);const t=await confirmFile(f,wb);if(t){S.tomas=S.tomas.filter(x=>x.nombre!==t.nombre);S.tomas.push(t);n++;save();render()}}catch(err){toast(`No se pudo leer ${f.name}`)}}
+  if(n)toast(`${n} toma(s) cargadas`)};
+
+render();
+
+/* ---------- PWA: instalación y modo offline ---------- */
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;$('bInstall').hidden=false});
+$('bInstall').onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;$('bInstall').hidden=true};
+window.addEventListener('appinstalled',()=>{$('bInstall').hidden=true;toast('App instalada')});
+if('serviceWorker'in navigator&&/^https?:$/.test(location.protocol)){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+if(typeof XLSX==='undefined')toast('Sin conexión: la lectura de Excel estará disponible al abrir la app con internet una vez.');
+}
+</script>
+</body>
+</html>
